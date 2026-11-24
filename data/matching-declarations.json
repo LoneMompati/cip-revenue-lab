@@ -1,0 +1,9 @@
+[
+  {"id":"SIM-001","account":"Account M01","commodity":"Textiles","invoiceRef":"inv63316293","declared":21539,"label":"Understated amount"},
+  {"id":"SIM-002","account":"Account M02","commodity":"Machinery","invoiceRef":"6418-517","declared":99822,"label":"Same number, different currency","fx":{"from":"EUR","to":"USD","numerator":120,"denominator":100,"reference":"Training rate FX-01"}},
+  {"id":"SIM-003","account":"Account M03","commodity":"Electronics","invoiceRef":"5Y9M1d-384","declared":62066,"label":"Partial recovery","openingEvents":[{"type":"assess"},{"type":"receive","cents":6000}]},
+  {"id":"SIM-004","account":"Account M04","commodity":"Food","invoiceRef":"9Y4M7d-262","declared":115560,"label":"Values agree"},
+  {"id":"SIM-005","account":"Account M05","commodity":"Textiles","invoiceRef":"INV-NOT-FOUND-405","declared":45000,"label":"Reference not found"},
+  {"id":"SIM-006","account":"Account M06","commodity":"Electronics","invoiceRef":"2Y5M2d-904","declared":30000,"label":"Two candidate invoices"},
+  {"id":"SIM-007","account":"Account M07","commodity":"Machinery","invoiceRef":"","declared":70000,"label":"Missing reference"}
+]

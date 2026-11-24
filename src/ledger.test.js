@@ -61,7 +61,42 @@ test('screening partitions the whole batch and referrals cannot create money', (
     }
   }
   assert.equal(Object.values(tally).reduce((a,b)=>a+b),6000);
-  assert.ok(Object.values(tally).every(n=>n>0));
+  assert.ok(Object.entries(tally).every(([key,n])=>key==='match'?n===0:n>0));
   const fresh=baseCase({declared:10000,evidence:{checked:true,currency:'USD',read:20000}});
   assert.equal(fresh.status,'review');assert.equal(fresh.assessed,null);
+});
+
+import {indexInvoices,matchDeclaration,referenceKey} from './matching.js';
+const fixture=name=>JSON.parse(fs.readFileSync(new URL('../data/'+name+'.json',import.meta.url)));
+const index=indexInvoices(input,fixture('invoice-references'));
+const scenarios=fixture('matching-declarations').map(d=>baseCase(matchDeclaration(d,index)));
+
+test('lookup uses printed references, preserving punctuation and leading zeros',()=>{
+  assert.equal(referenceKey(' inv-001 '),'INV-001');
+  const [first]=scenarios;
+  assert.equal(first.match.candidates[0].printed,'INV63316293');
+  assert.equal(first.evidence.document,'Template22_Instance76');
+  assert.equal(matchDeclaration({...first,invoiceRef:'INV-63316293'},index).evidence,null);
+  assert.equal(first.potential,15000);
+  const assessed=applyAction(first,{type:'assess'});
+  const paid=applyAction(assessed,{type:'receive',cents:15000});
+  assert.equal(paid.status,'paid');assert.equal(balance(paid),0);
+});
+test('missing, unknown and ambiguous references never receive a comparison or assessment',()=>{
+  assert.deepEqual(scenarios.slice(4).map(r=>r.match.status),['not_found','ambiguous','missing']);
+  assert.equal(scenarios[5].match.candidates.length,2);
+  for(const r of scenarios.slice(4)){
+    assert.equal(r.evidence,null);assert.equal(r.potential,null);assert.equal(screeningQueue(r),'match');
+    for(const action of [{type:'assess'},{type:'receive',cents:1},{type:'confirm_fx'}]) assert.equal(applyAction(r,action),r);
+    assert.equal(applyAction(r,{type:'refer'}).status,'referred');
+  }
+});
+test('currency must be confirmed and converted before assessment; settled example reconciles',()=>{
+  const fx=scenarios[1];assert.equal(fx.potential,null);assert.equal(applyAction(fx,{type:'assess'}),fx);
+  const checked=applyAction(fx,{type:'confirm_fx'});assert.equal(checked.converted,119786);
+  assert.equal(checked.potential,1997);assert.equal(checked.assessed,null);
+  assert.equal(applyAction(checked,{type:'confirm_fx'}),checked);
+  const partial=scenarios[2].openingEvents.reduce(applyAction,scenarios[2]);
+  assert.equal(partial.assessed,10000);assert.equal(partial.recovered,6000);assert.equal(balance(partial),4000);
+  assert.equal(scenarios[3].potential,0);
 });

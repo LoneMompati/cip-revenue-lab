@@ -42,3 +42,14 @@ The generator verifies the original shipment CSV hash, takes the first 6,000 IDs
 The four screening outcomes partition all 6,000 declarations. Click **Positive duty gap** for comparable pairs with a potential shortfall, **No positive gap** for the other comparable pairs, **Check currency** for an ambiguous dollar sign or an explicit non-USD amount, or **Check document** for a missing total region or unverified read. The queue counts describe the full screening batch. The financial cards describe only the selected register rows. An unavailable amount appears as a dash.
 
 Open a declaration to see the original reader evidence and the reason for its queue. Referrals and payments stay in the tab's session history. The minimum duty gap filter helps an officer prioritise larger opportunities. New invoice excerpts are stored in packs of 32 under `public/evidence-batches/` and loaded when an officer opens a case.
+
+## Invoice matching
+
+[Open the live matching exercise](https://lonemompati.github.io/cip-revenue-lab/#invoice-matching). Seven simulated declarations run against an independent index built from the FATURA NUMBER annotations of the 6,000 published pages. Of those pages, 5,298 have an indexable printed number. The matcher trims outer spaces and ignores case. It preserves punctuation and leading zeros and requires exactly one candidate. The declaration inputs contain no target document IDs. Missing, unknown and duplicate references enter **Check reference** with no financial estimate. A unique match opens the actual public invoice extract. These exercises have their own totals and use the same assessment and payment ledger as the main register.
+
+- **SIM-001:** USD 215.39 declared, USD 1,715.39 invoiced. At the illustrative 10% rate the gap is USD 150.00. Assess it and record a partial or full payment.
+- **SIM-002:** the declaration says USD 998.22 and the invoice says EUR 998.22. The exercise supplies an illustrative rate of USD 1.20 per EUR. Confirming that rate gives USD 1,197.86 of invoice value and USD 19.97 of potential extra duty. Assessment and payment remain separate actions.
+- **SIM-003:** a worked partial recovery with USD 100 assessed, USD 60 received and USD 40 outstanding.
+- **SIM-004 through SIM-007:** an agreeing value, an unknown reference, two invoices with the same printed reference, and a missing reference.
+
+The examples illustrate discrepancies and their financial consequences. Operational findings about intent require independent evidence. The reference index can be regenerated separately with `python3 scripts/invoice_references.py /path/to/fatura_dataset`; the full preparation command also rebuilds it.

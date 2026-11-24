@@ -8,7 +8,7 @@ export const statusText = {
 export function baseCase(row) {
   const e = row.evidence;
   const base = { ...row, original: e ? duty(row.declared) : null, potential: null, assessed: null, recovered: 0 };
-  if (!e) return { ...base, status: 'unlinked' };
+  if (!e) return { ...base, status: row.match ? 'check' : 'unlinked' };
   if (!e.checked || e.currency !== 'USD') return { ...base, status: 'check' };
   const potential = Math.max(0, duty(e.read) - base.original);
   if (row.example == null) return { ...base, potential, status: potential ? 'review' : 'no_gap' };
@@ -22,6 +22,14 @@ export function baseCase(row) {
 }
 
 export function applyAction(row, action) {
+  if (action?.type === 'confirm_fx' && ['check','referred'].includes(row.status) && row.match?.status==='matched'
+      && row.evidence?.checked && row.fx?.from===row.evidence.currency && row.fx?.to==='USD'
+      && Number.isSafeInteger(row.fx.numerator) && row.fx.numerator>0
+      && Number.isSafeInteger(row.fx.denominator) && row.fx.denominator>0) {
+    const converted = Math.round(row.evidence.read * row.fx.numerator / row.fx.denominator);
+    const potential = Math.max(0, duty(converted)-row.original);
+    return {...row,converted,potential,status:potential?'review':'no_gap'};
+  }
   if (action?.type === 'refer' && row.status === 'check')
     return { ...row, status: 'referred' };
   if (action?.type === 'assess' && row.status === 'review')
@@ -51,12 +59,14 @@ export function parsePayment(text) {
 
 // A screening outcome stays fixed when an officer assesses the case or records a payment.
 export const queues = {
+  match: 'Check reference',
   gap: 'Positive duty gap',
   no_gap: 'No positive gap',
   currency: 'Check currency',
   reading: 'Check document'
 };
 export function screeningQueue(row) {
+  if (row.match && row.match.status!=='matched') return 'match';
   const e = row.evidence;
   if (e?.reason === 'ambiguous_currency' || (e?.checked && e.currency !== 'USD')) return 'currency';
   if (!e?.checked) return 'reading';
@@ -64,6 +74,8 @@ export function screeningQueue(row) {
 }
 export function screeningReason(row) {
   const e = row.evidence;
+  if (row.match && row.match.status!=='matched') return 'The reference has not identified one invoice. Amount comparison and assessment are on hold.';
+  if (row.converted!=null) return 'The officer confirmed the training exchange rate. The converted invoice and the declaration can now be compared in USD.';
   if (!e) return 'No supporting invoice is attached.';
   if (e.reason === 'no_total') return 'The public annotation has no final-total region for the reader. An officer needs to locate the payable amount.';
   if (e.reason === 'ambiguous_currency') return 'The total uses a dollar sign without a currency code. An officer must confirm which dollar the invoice uses.';

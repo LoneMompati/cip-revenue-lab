@@ -3,11 +3,14 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import {baseCase, applyAction, sumRows, balance, parsePayment, screeningQueue, queues} from './ledger.js';
 const input = JSON.parse(fs.readFileSync(new URL('../data/shipments.json', import.meta.url)));
-const rows = input.map(baseCase);
+import {indexInvoices,matchDeclaration,referenceKey} from './matching.js';
+const fixture=name=>JSON.parse(fs.readFileSync(new URL('../data/'+name+'.json',import.meta.url)));
+const index=indexInvoices(input,fixture('invoice-references'));
+const rows = input.map(r=>baseCase(matchDeclaration(r,index)));
 test('sample, evidence attachments and distinct keys reconcile', () => {
   assert.equal(rows.length,6000);
   assert.equal(new Set(rows.map(r=>r.id)).size,6000);
-  const docs=rows.filter(r=>r.evidence);
+  const docs=input.filter(r=>r.evidence);
   assert.equal(docs.length, 6000);
   assert.equal(new Set(docs.map(r=>r.evidence.document)).size,6000);
   const packs = new Map();
@@ -51,7 +54,7 @@ test('screening partitions the whole batch and referrals cannot create money', (
   for (const r of rows) {
     const key=screeningQueue(r);
     tally[key]++;
-    if (key==='currency'||key==='reading') {
+    if (key==='currency'||key==='reading'||key==='match') {
       const referred=applyAction(r,{type:'refer'});
       assert.equal(referred.status,'referred');
       assert.equal(screeningQueue(referred),key);
@@ -61,14 +64,11 @@ test('screening partitions the whole batch and referrals cannot create money', (
     }
   }
   assert.equal(Object.values(tally).reduce((a,b)=>a+b),6000);
-  assert.ok(Object.entries(tally).every(([key,n])=>key==='match'?n===0:n>0));
+  assert.ok(Object.values(tally).every(n=>n>0));
   const fresh=baseCase({declared:10000,evidence:{checked:true,currency:'USD',read:20000}});
   assert.equal(fresh.status,'review');assert.equal(fresh.assessed,null);
 });
 
-import {indexInvoices,matchDeclaration,referenceKey} from './matching.js';
-const fixture=name=>JSON.parse(fs.readFileSync(new URL('../data/'+name+'.json',import.meta.url)));
-const index=indexInvoices(input,fixture('invoice-references'));
 const scenarios=fixture('matching-declarations').map(d=>baseCase(matchDeclaration(d,index)));
 
 test('lookup uses printed references, preserving punctuation and leading zeros',()=>{
@@ -99,4 +99,22 @@ test('currency must be confirmed and converted before assessment; settled exampl
   const partial=scenarios[2].openingEvents.reduce(applyAction,scenarios[2]);
   assert.equal(partial.assessed,10000);assert.equal(partial.recovered,6000);assert.equal(balance(partial),4000);
   assert.equal(scenarios[3].potential,0);
+});
+
+test('main register resolves submitted references before computing recovery',()=>{
+  const counts = {};
+  for(const r of rows){
+    counts[r.match.status]=(counts[r.match.status]??0)+1;
+    if (r.match.status!=='matched'){
+      assert.equal(r.evidence,null);assert.equal(r.potential,null);assert.equal(r.assessed,null);assert.equal(r.recovered,0);
+    } else assert.equal(referenceKey(r.invoiceRef),referenceKey(r.match.candidates[0].printed));
+  }
+  assert.deepEqual(counts,{matched:5296,missing:702,ambiguous:2});
+  const source=input.find(r=>r.id==='SHP004167');
+  const rec=rows.find(r=>r.id===source.id);
+  assert.equal(rec.match.candidates[0].printed,'INV/40-85/952');
+  assert.equal(rec.potential,3405);assert.equal(rec.recovered,1702);assert.equal(balance(rec),1703);
+  const altered=baseCase(matchDeclaration({...source,invoiceRef:'UNRESOLVED'},index));
+  assert.equal(altered.match.status,'not_found');assert.equal(altered.evidence,null);assert.equal(altered.assessed,null);
+  const paid=applyAction(rec,{type:'receive',cents:1703});assert.equal(paid.status,'paid');assert.equal(balance(paid),0);
 });

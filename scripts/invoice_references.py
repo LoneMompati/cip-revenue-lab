@@ -18,6 +18,11 @@ def build_references(rows, folder):
             match = NUMBER.fullmatch(number.get("text", "").strip())
             if match:
                 references[name] = match[1]
+    # Kaggle shipments have no invoice number; persist the coursework declaration
+    # field during preparation so runtime matching can use the submitted field alone.
+    for row in rows:
+        row["invoiceRef"] = references.get(row["evidence"]["document"], "")
+    (ROOT / "data/shipments.json").write_text(json.dumps(rows, separators=(",", ":")) + "\n")
     (ROOT / "data/invoice-references.json").write_text(json.dumps(references, sort_keys=True, separators=(",", ":")) + "\n")
 
 

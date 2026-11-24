@@ -187,7 +187,6 @@ def prepare(customs, folder):
             lookup.update(evidence)
     for i, (row,name) in enumerate(zip(remaining,names,strict=True)):
         row.update(evidence=lookup[name], account=f"Account {13+i%240:02}")
-    (ROOT / "data/shipments.json").write_text(json.dumps(rows,separators=(",",":"))+"\n")
     build_references(rows, folder)
     print(f"Screened {len(rows)} declarations and {len(used)+len(lookup)} distinct invoices.")
 if __name__ == "__main__":

@@ -139,3 +139,27 @@ test('main currency case converts, assesses and collects in separate steps',()=>
     assert.equal(held.fx,undefined);assert.equal(applyAction(held,{type:'confirm_fx'}),held);
   }
 });
+
+import {measures,contributingRows} from './executive.js';
+test('each executive total reconciles to its contributing declarations after a currency assessment and a payment',()=>{
+  const original=rows.find(r=>r.id==='SHP008851');
+  const converted=applyAction(original,{type:'confirm_fx'});
+  const assessed=applyAction(converted,{type:'assess'});
+  const paid=applyAction(assessed,{type:'receive',cents:2000});
+  const opening=sumRows(rows);
+  for(const r of [original,converted,assessed,paid]){
+    const batch=rows.map(other=>other.id===r.id?r:other);
+    const totals=sumRows(batch);
+    for(const m of measures){
+      const contributors=contributingRows(batch,m.key);
+      assert.equal(totals[m.key],contributors.reduce((total,item)=>total+m.amount(item),0));
+      assert.equal(contributors.includes(r),m.amount(r)>0);
+      assert.ok(contributors.every(item=>item.match.status==='matched'));
+    }
+    if(r===paid){
+      assert.equal(totals.assessed,opening.assessed+4720);
+      assert.equal(totals.recovered,opening.recovered+2000);
+      assert.equal(totals.owed,opening.owed+2720);
+    }
+  }
+});

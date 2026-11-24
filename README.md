@@ -2,7 +2,13 @@
 
 [Open Revenue Recovery](https://lonemompati.github.io/cip-revenue-lab/)
 
-Start with [SHP004167 in the main recovery register](https://lonemompati.github.io/cip-revenue-lab/?shipment=SHP004167#screening). Its case detail shows the submitted and printed references, invoice image, duty gap, assessment, cash received and balance. Open the invoice total line, compare it with the declared amount and follow the additional duty from assessment through to collection. Select a screening queue and filter by account, commodity, minimum duty gap or case stage. Cases with uncertain evidence can be referred for a document or currency check. Search and filters update the four totals. Open a **To review** case to assess or close it. Open an assessed case to record a partial or full payment. Actions apply to the current browser tab and survive a reload.
+Start with [SHP004167 in the main recovery register](https://lonemompati.github.io/cip-revenue-lab/?shipment=SHP004167#screening). Its case detail shows the submitted and printed references, invoice image, duty gap, assessment, cash received and balance. Open the invoice total line, compare it with the declared amount and follow the additional duty from assessment through to collection. Select a screening queue and filter by account, commodity, minimum duty gap or case stage. Cases with uncertain evidence can be referred for a document or currency check. Search and filters update the four totals. Open a **To review** case to assess or close it. Open an assessed case to record a partial or full payment. Register actions are saved locally and shared across CIP tabs in the same browser profile when shared storage is available.
+
+## Executive overview
+
+[Open the live executive dashboard](https://lonemompati.github.io/cip-revenue-lab/#executive). Potential, assessed, recovered and outstanding amounts use the same case balances as the main USD register. Select a card to open just the declarations contributing a positive amount to that measure. The cash collection percentage is cash recovered divided by extra duty assessed. The seven separate worked examples and held historical balances are excluded.
+
+An assessment increases assessed duty and the outstanding balance. A payment increases cash recovered and reduces that balance. Updates propagate between open tabs on the same site using browser storage and a write lock. A browser without shared storage uses its own tab session. This coursework site has no shared server ledger. The original BWP monthly coursework report opens the connected USD overview through its executive toolbar.
 
 ## Open data and scope
 
@@ -21,7 +27,7 @@ The downloadable data is in [data/shipments.json](data/shipments.json). All mone
 1. During preparation the pipeline checks each linked page. Where a TOTAL annotation exists, Tesseract’s English OCR reads that region. Missing regions remain in the document-check queue. A bare dollar sign stays unconfirmed, and an explicit EUR amount requires a currency check. An officer can confirm the fixed training rate for a uniquely matched, verified EUR invoice. Ambiguous currency remains on hold. The source annotation supplies the location. Both OCR amount and currency must match its label to pass the check. We publish the cropped, enlarged line so a reviewer can inspect the same evidence. This assisted demonstration does not benchmark full-page invoice detection.
 2. The scenario assumes the USD invoice total and declared value are comparable for that shipment. Verified USD totals can be compared immediately. EUR totals must first be converted using the confirmed training rate. A currency mismatch or failed read goes to **Check evidence**. A shipment without a document has no estimated gap.
 3. We assume original duty was paid at an illustrative 10%. Potential extra duty is the positive difference between duty on the document value and duty on the declared value, each rounded to cents. An officer's decision creates an assessment. Closing without extra duty leaves no debt.
-4. Outstanding extra duty equals the extra assessment less additional receipts. The original duty payment is shown separately. Amounts in the cards relate to the filtered rows. The opening assessments and payments are limited to the original pilot scenarios. New positive gaps start unassessed. The screening queues retain the original result after a referral, assessment or receipt; subsequent decisions are replayed from the current tab's session.
+4. Outstanding extra duty equals the extra assessment less additional receipts. The original duty payment is shown separately. Amounts in the cards relate to the filtered rows. The opening assessments and payments are limited to the original pilot scenarios. New positive gaps start unassessed. The screening queues retain the original result after a referral, assessment or receipt; subsequent decisions are replayed from the browser ledger.
 
 ## Run and reproduce
 
@@ -43,11 +49,11 @@ The five screening outcomes partition all 6,000 declarations. **Check reference*
 
 In this release 5,296 shipments have one matching invoice, 702 lack a reference and two carry the same ambiguous number. Earlier scenario assessments and receipts on blocked cases are shown separately in case details for reconciliation and excluded from matched recovery totals.
 
-Open a declaration to see the original reader evidence and the reason for its queue. Referrals and payments stay in the tab's session history. The minimum duty gap filter helps an officer prioritise larger opportunities. New invoice excerpts are stored in packs of 32 under `public/evidence-batches/` and loaded when an officer opens a case.
+Open a declaration to see the original reader evidence and the reason for its queue. Referrals and payments appear in the case history. The minimum duty gap filter helps an officer prioritise larger opportunities. New invoice excerpts are stored in packs of 32 under `public/evidence-batches/` and loaded when an officer opens a case.
 
 ### Currency review in the main register
 
-[Open shipment SHP008851](https://lonemompati.github.io/cip-revenue-lab/?shipment=SHP008851#screening). Its declaration is USD 1,474.04 and the matched invoice is EUR 1,621.68. Confirming training rate FX-01 (USD 1.20 per EUR) gives USD 1,946.02. At the illustrative 10% duty rate, duty rises from USD 147.40 to USD 194.60. Assess the USD 47.20 difference, then record a USD 20.00 payment to see USD 27.20 still owed. The original currency flag stays visible when the case status changes. Confirmation, assessment and payment each require a separate action in your browser tab.
+[Open shipment SHP008851](https://lonemompati.github.io/cip-revenue-lab/?shipment=SHP008851#screening). Its declaration is USD 1,474.04 and the matched invoice is EUR 1,621.68. Confirming training rate FX-01 (USD 1.20 per EUR) gives USD 1,946.02. At the illustrative 10% duty rate, duty rises from USD 147.40 to USD 194.60. Assess the USD 47.20 difference, then record a USD 20.00 payment to see USD 27.20 still owed. The original currency flag stays visible when the case status changes. Confirmation, assessment and payment each require a separate action.
 
 ## Additional worked examples
 

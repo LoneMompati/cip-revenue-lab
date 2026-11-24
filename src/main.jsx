@@ -1,4 +1,4 @@
-import React,{useEffect,useMemo,useRef,useState} from 'react';
+import React,{useEffect,useMemo,useRef,useState,useSyncExternalStore} from 'react';
 import {createRoot} from 'react-dom/client';
 import shipments from '../data/shipments.json';
 import {baseCase,applyAction,balance,sumRows,statusText,parsePayment} from './ledger.js';
@@ -8,6 +8,9 @@ import references from '../data/invoice-references.json';
 import declarations from '../data/matching-declarations.json';
 import {indexInvoices,matchDeclaration,matchLabels} from './matching.js';
 import ReferenceMatch from './ReferenceMatch.jsx';
+import ExecutiveOverview from './ExecutiveOverview.jsx';
+import {contributingRows,measures} from './executive.js';
+import {getEvents,subscribe,postEvent,sharedAcrossTabs} from './browserLedger.js';
 import './style.css';
 
 const index=indexInvoices(shipments,references);
@@ -19,7 +22,6 @@ const matchingRecords=declarations.map(d=>{
   return (d.openingEvents??[]).reduce(applyAction,row);
 });
 const count = n => n.toLocaleString('en-US');
-const sessionKey='cip-open-recovery-events-v1';
 const format=(cents,currency='USD')=> cents==null?'—':new Intl.NumberFormat('en-US',{style:'currency',currency}).format(cents/100);
 function invoiceAmount(e) {
   if (e?.reason==='ambiguous_currency' && e.read!=null) return (e.read/100).toLocaleString('en-US',{minimumFractionDigits:2})+' $ (?)';
@@ -27,9 +29,6 @@ function invoiceAmount(e) {
 }
 const fields=[['potential','Potential duty gap','Invoice comparison'],['assessed','Extra duty assessed','Confirmed in the scenario'],['recovered','Cash recovered','Payments against extra duty'],['owed','Still owed','Assessed less recovered']];
 const sorts={owed:r=>balance(r)??-1,potential:r=>r.potential??-1,declared:r=>r.declared};
-function readEvents(){
-  try {const value=JSON.parse(sessionStorage.getItem(sessionKey));return value && typeof value==='object'&&!Array.isArray(value)?value:{};} catch{return {};}
-}
 function Status({row}){return <span className={'status '+row.status}><i/>{statusText[row.status]}</span>}
 function Modal({title,onClose,children}){
   const ref=useRef(null);
@@ -43,14 +42,22 @@ function Sources(){return <div className="dialogbody"><h2>Where the records come
   <p>The datasets have no common transaction ID. The first 48 pilot pairings illustrate review and collection. The other 5,952 shipments each receive one unused invoice selected in repeatable hash order. During preparation the available printed reference is copied to a simulated declaration field. The register then looks that field up across the full invoice index. A missing or duplicate reference holds the case for review. The pairings and their results do not measure real underpayment.</p>
   <p>Each page is checked during preparation. Where the annotation locates a total, Tesseract reads that crop. A missing total region, uncertain read or ambiguous dollar sign is routed to an officer. Both amount and currency must match the benchmark annotation. Both registers compare verified USD amounts directly. For a uniquely matched EUR invoice, an officer can confirm the fixed coursework rate before comparing the converted amount with the USD declaration. The demo assumes the invoice total is comparable to the declared value and uses a flat 10% duty for illustration.</p>
   <p>Invoice matching searches FATURA’s annotated NUMBER field. The simulated declarations supply their own references and USD values. A missing, unknown or duplicate reference stops the comparison. FX-01 is an illustrative training rate. This view reports its own cases separately from shipment screening.</p>
-  <p>Account aliases, original duty payments, assessments and collection entries are simulated. Actions you take apply to this browser tab’s session.</p></div>}
+  <p>Account aliases, original duty payments, assessments and collection entries are simulated. Changes are saved in this browser. Worked examples use a separate set of declarations.</p></div>}
 function CaseDetail({row,history,opening,previousLedger,post}){
   const [amount,setAmount]=useState(''),[message,setMessage]=useState('');
   const e=row.evidence,owed=balance(row);
+  const posting=useRef(false);
+  async function save(action,success){
+    if(posting.current) return;
+    posting.current=true;
+    try { await post(action); setMessage(success); if(action.type==='receive') setAmount(''); }
+    catch(error){setMessage(error.message || 'Could not save the entry. Try again.')}
+    finally {posting.current=false}
+  }
   function record(){
     const cents=parsePayment(amount);
     if(!cents || cents>owed){setMessage('Enter a positive payment up to '+format(owed)+', using up to two decimal places.');return;}
-    post({type:'receive',cents});setAmount('');setMessage('Recorded '+format(cents)+' against this assessment.');
+    save({type:'receive',cents},'Recorded '+format(cents)+' against this assessment.');
   }
   return <div className="dialogbody"><div className="detailtitle"><div><small>{row.account??'Unpaired shipment'} · {row.commodity}</small><h2>{row.id}</h2></div><Status row={row}/></div>
     {row.id==='SIM-001' && <p className="note">In this fictional exercise, the declarant deliberately enters USD 215.39 for goods invoiced at USD 1,715.39. Follow the evidence below to establish how much duty remains to be assessed and collected.</p>}
@@ -60,7 +67,7 @@ function CaseDetail({row,history,opening,previousLedger,post}){
     <p className="note">{screeningReason(row)}</p>
     {row.match?.status==='matched' && row.potential!=null && <p className="difference">Invoice less declaration (USD) <strong>{format((row.converted??e.read)-row.declared)}</strong></p>}
     {row.fx && e?.checked && row.match?.status==='matched' && <section className="fx"><strong>{row.fx.reference}</strong><p>For this exercise, 1 {row.fx.from} = {(row.fx.numerator/row.fx.denominator).toFixed(2)} {row.fx.to}. Confirm the rate to compare the invoice with the USD declaration.</p>
-      {['check','referred'].includes(row.status) && <button onClick={()=>{post({type:'confirm_fx'});setMessage('Training rate confirmed. Check the USD difference before assessment.')}}>Confirm training exchange rate</button>}
+      {['check','referred'].includes(row.status) && <button onClick={()=>save({type:'confirm_fx'},'Training rate confirmed. Check the USD difference before assessment.')}>Confirm training exchange rate</button>}
       {row.converted!=null && <p>Converted invoice total <b>{format(row.converted)} USD</b></p>}
     </section>}
     {row.match?.status==='matched' && <p className="note">An amount or currency discrepancy gives an officer a reason to investigate. Intent requires further evidence.</p>}
@@ -73,8 +80,8 @@ function CaseDetail({row,history,opening,previousLedger,post}){
       {opening.recovered>0 && <li>Opening entry · payment received {format(opening.recovered)}</li>}
       {history.map((a,i)=><li key={i}>{a.type==='confirm_fx'?row.fx.reference+' confirmed · converted invoice '+format(row.converted)+' USD':a.type==='receive'?'Payment received '+format(a.cents):a.type==='assess'?'Extra duty assessed '+format(row.potential):a.type==='refer'?'Referred for '+queues[screeningQueue(row)].toLowerCase().replace('check ','')+' review':'Review closed with no extra duty'}</li>)}
     </ol></details>}
-    {row.status==='check' && <button className="primary" onClick={()=>{post({type:'refer'});setMessage('Referral recorded in this tab. The extra duty remains unassessed.')}}>{screeningQueue(row)==='currency'?'Refer for currency review':screeningQueue(row)==='match'?'Refer for reference review':'Refer for document review'}</button>}
-    {row.status==='review' && <div className="actions"><button className="primary" onClick={()=>{post({type:'assess'});setMessage('Extra duty assessed in this session.')}}>Assess {format(row.potential)}</button><button onClick={()=>{post({type:'clear'});setMessage('Review closed with no extra duty.')}}>Close with no extra duty</button></div>}
+    {row.status==='check' && <button className="primary" onClick={()=>save({type:'refer'},'Referral recorded. The extra duty remains unassessed.')}>{screeningQueue(row)==='currency'?'Refer for currency review':screeningQueue(row)==='match'?'Refer for reference review':'Refer for document review'}</button>}
+    {row.status==='review' && <div className="actions"><button className="primary" onClick={()=>save({type:'assess'},'Extra duty assessed.')}>Assess {format(row.potential)}</button><button onClick={()=>save({type:'clear'},'Review closed with no extra duty.')}>Close with no extra duty</button></div>}
     {owed>0 && <form onSubmit={ev=>{ev.preventDefault();record()}}><label>Payment received (USD)<input inputMode="decimal" value={amount} placeholder="0.00" onChange={ev=>setAmount(ev.target.value)}/></label><button className="primary">Record payment</button></form>}
     <p role="status" className="message">{message}</p></div>
 }
@@ -83,7 +90,7 @@ function CaseDetail({row,history,opening,previousLedger,post}){
 function eventKey(row){
   return originalCases.has(row.id) && row.match.status!=='matched' ? 'reference:'+row.id : row.id;
 }
-function RecoveryView({matching}){
+function RecoveryView({matching,executive,measure}){
   const records=matching?matchingRecords:batchRecords;
   const linked=records.filter(r=>r.evidence).length;
   const visibleQueues=Object.entries(queues);
@@ -92,16 +99,17 @@ function RecoveryView({matching}){
     for(const r of records){const key=screeningQueue(r);counts[key]=(counts[key]??0)+1;}
     return counts;
   },[records]);
-  const [events,setEvents]=useState(readEvents),[queue,setQueue]=useState('all'),[minimum,setMinimum]=useState(''),[stage,setStage]=useState('all'),[query,setQuery]=useState(''),[sort,setSort]=useState(matching?'id':'owed'),[page,setPage]=useState(0),[selected,setSelected]=useState(()=>{const id=new URLSearchParams(window.location.search).get('shipment');return !matching && originalCases.has(id)?id:null}),[sources,setSources]=useState(false);
+  const events=useSyncExternalStore(subscribe,getEvents);
+  const [queue,setQueue]=useState('all'),[minimum,setMinimum]=useState(''),[stage,setStage]=useState('all'),[query,setQuery]=useState(''),[sort,setSort]=useState(matching?'id':'owed'),[page,setPage]=useState(0),[selected,setSelected]=useState(()=>{const id=new URLSearchParams(window.location.search).get('shipment');return !executive && !measure && !matching && originalCases.has(id)?id:null}),[sources,setSources]=useState(false);
   const rows=useMemo(()=>records.map(r=>{
     const log=events[eventKey(r)];
     return Array.isArray(log)?log.reduce(applyAction,r):r;
   }),[events,records]);
   const filtered=useMemo(()=>{
     const term=query.trim().toLowerCase();
-    return rows.filter(r=>(queue==='all'||screeningQueue(r)===queue)&&(!Number(minimum)||(r.potential??0)>=Math.round(Number(minimum)*100))&&(stage==='all'||r.status===stage)&&(!term||[r.id,r.commodity,r.account,r.invoiceRef,r.label].some(s=>s?.toLowerCase().includes(term))))
+    return contributingRows(rows,measure).filter(r=>(queue==='all'||screeningQueue(r)===queue)&&(!Number(minimum)||(r.potential??0)>=Math.round(Number(minimum)*100))&&(stage==='all'||r.status===stage)&&(!term||[r.id,r.commodity,r.account,r.invoiceRef,r.label].some(s=>s?.toLowerCase().includes(term))))
       .sort((a,b)=>sort==='id'?a.id.localeCompare(b.id):sorts[sort](b)-sorts[sort](a)||a.id.localeCompare(b.id));
-  },[rows,queue,minimum,stage,query,sort]);
+  },[rows,measure,queue,minimum,stage,query,sort]);
   const sums=sumRows(filtered),hasComparison=filtered.some(r=>r.potential!=null),hasAssessment=filtered.some(r=>r.assessed!=null),size=12,last=Math.max(0,Math.ceil(filtered.length/size)-1),current=Math.min(page,last);
   const active=selected?rows.find(r=>r.id===selected):null;
   let previousLedger=null;
@@ -112,23 +120,16 @@ function RecoveryView({matching}){
   }
   function change(set,value){set(value);setPage(0)}
   function post(action){
-    setEvents(previous=>{
-      const key=eventKey(active);
-      const log=Array.isArray(previous[key])?previous[key]:[];
-      const record=records.find(r=>r.id===selected),cur=log.reduce(applyAction,record);
-      if(applyAction(cur,action)===cur)return previous;
-      const next={...previous,[key]:[...log,action]};
-      try{sessionStorage.setItem(sessionKey,JSON.stringify(next))}catch{}
-      return next;
-    });
+    return postEvent(records.find(r=>r.id===selected),eventKey(active),action);
   }
   return <><header className="mast"><div className="brand"><b className="mark">CIP</b><span>Customs Intelligence Platform</span></div><button onClick={()=>setSources(true)}>Data sources ↗</button></header>
-  <main><nav aria-label="Recovery views" className="viewnav"><a href="#screening" aria-current={!matching?'page':undefined}>Shipment screening</a><a href="#invoice-matching" aria-current={matching?'page':undefined}>Worked examples</a></nav><header className="pagehead"><div><p className="overline">DECLARATION REVIEW</p><h1>{matching?'Invoice matching':'Revenue recovery'}</h1><p>{matching?'Find the supporting invoice first. Then check the amount, currency and extra duty.':'Match each shipment’s invoice reference and follow extra duty from assessment to payment.'}</p></div><div className="coverage"><small>Unique invoice matches</small><strong>{count(linked)} <span>/ {records.length.toLocaleString()}</span></strong><small>{matching?'simulated declarations':'shipments screened'}</small></div></header>
-  {!matching && <p className="matchintro">Review the currency mismatch on <button className="case" onClick={()=>setSelected('SHP008851')}>SHP008851 ↗</button> or see a partial recovery on <button className="case" onClick={()=>setSelected('SHP004167')}>SHP004167 ↗</button>.</p>}
+  <main><nav aria-label="Recovery views" className="viewnav"><a href="#executive" aria-current={executive?'page':undefined}>Executive overview</a><a href="#screening" aria-current={!executive&&!matching?'page':undefined}>Shipment screening</a><a href="#invoice-matching" aria-current={matching?'page':undefined}>Worked examples</a></nav>{executive ? <ExecutiveOverview rows={rows} format={format} shared={sharedAcrossTabs}/> : <><header className="pagehead"><div><p className="overline">DECLARATION REVIEW</p><h1>{matching?'Invoice matching':'Revenue recovery'}</h1><p>{matching?'Find the supporting invoice first. Then check the amount, currency and extra duty.':'Match each shipment’s invoice reference and follow extra duty from assessment to payment.'}</p></div><div className="coverage"><small>Unique invoice matches</small><strong>{count(linked)} <span>/ {records.length.toLocaleString()}</span></strong><small>{matching?'simulated declarations':'shipments screened'}</small></div></header>
+  {!matching && !measure && <p className="matchintro">Review the currency mismatch on <button className="case" onClick={()=>setSelected('SHP008851')}>SHP008851 ↗</button> or see a partial recovery on <button className="case" onClick={()=>setSelected('SHP004167')}>SHP004167 ↗</button>.</p>}
   {matching && <p className="matchintro">Search covers {count(indexedCount)} FATURA invoices with a printed reference among {count(shipments.length)} documents. The seven training declarations have their own totals. Start with <button className="case" onClick={()=>setSelected('SIM-001')}>SIM-001 ↗</button> to trace an underpayment.</p>}
-  <section className="screening" aria-label="Screening outcomes"><div className="screenhead"><h2>Screening outcomes</h2><small>Whole batch · select a queue to open its declarations</small></div>
+  {measure && <div className="measure-context"><a href="#executive">← Executive overview</a><strong>{measures.find(m=>m.key===measure).label} · contributing declarations</strong><a href="#screening">Show all shipments</a></div>}
+  {!measure && <section className="screening" aria-label="Screening outcomes"><div className="screenhead"><h2>Screening outcomes</h2><small>Whole batch · select a queue to open its declarations</small></div>
     <div className="queues">{[['all','All screened'],...visibleQueues].map(([key,label])=><button key={key} aria-pressed={queue===key} onClick={()=>{setQueue(key);setStage('all');setQuery('');setMinimum('');setPage(0);setSort(key==='gap'?'potential':'owed')}}><span>{label}</span><b>{count(key==='all'?records.length:(queueCounts[key]??0))}</b></button>)}</div>
-  </section>
+  </section>}
   <section aria-label="Totals for filtered declarations" className="metrics">{fields.map(([key,label,note])=><article key={key} className={key}><small>{label}</small><strong>{format((key==='potential'?hasComparison:hasAssessment)?sums[key]:null)}</strong><span>{note}</span></article>)}</section>
   <section className="work"><div className="workhead"><div><h2>Recovery register</h2><p>Open a declaration to check its invoice and payment history.</p></div><span className="unit">USD · Coursework scenario</span></div>
   <div className="tools"><label>Search<input type="search" placeholder={matching?"Declaration or invoice reference":"Shipment, invoice reference or account"} value={query} onChange={e=>change(setQuery,e.target.value)}/></label>
@@ -138,14 +139,16 @@ function RecoveryView({matching}){
   <div className="scroll" tabIndex="0" aria-label="Scrollable declaration register"><table><thead><tr>{['Declaration / account','Stage','Declared','Invoice total','Duty paid¹','Potential gap','Extra assessed','Recovered','Still owed'].map(k=><th key={k}>{k}</th>)}</tr></thead><tbody>{filtered.slice(current*size,(current+1)*size).map(r=><tr key={r.id}><td><button className="case" onClick={()=>setSelected(r.id)}>{r.id} ↗</button><small>{matching?r.label:(r.account??'—')+' · '+r.commodity}</small></td><td><Status row={r}/><small>{matchLabels[r.match.status]}</small></td><td>{format(r.declared)}</td><td>{invoiceAmount(r.evidence)}</td><td>{format(r.original)}</td><td>{format(r.potential)}</td><td>{format(r.assessed)}</td><td className={r.recovered?'green':''}>{format(r.assessed===null?null:r.recovered)}</td><td className={balance(r)>0?'red':''}>{format(balance(r))}</td></tr>)}</tbody></table></div>
   {!filtered.length && <p className="empty">No declarations match these filters. <button onClick={()=>{setQuery('');setStage('all');setQueue('all');setMinimum('');setPage(0)}}>Clear filters</button></p>}
   <div className="pager"><small>{filtered.length?current*size+1:0}–{Math.min((current+1)*size,filtered.length)} of {filtered.length.toLocaleString()} declarations</small><div><button disabled={!current} onClick={()=>setPage(current-1)}>Previous</button><button disabled={current===last} onClick={()=>setPage(current+1)}>Next</button></div></div></section>
-  <footer>¹ Duty paid on the original declaration. The extra assessment, recoveries and balance relate only to the additional duty. A dash means the amount has not been established. Totals follow the filters above.</footer></main>
+  <footer>¹ Duty paid on the original declaration. The extra assessment, recoveries and balance relate only to the additional duty. A dash means the amount has not been established. Totals follow the filters above.</footer></>}</main>
   {active&&<Modal title="Declaration details" onClose={()=>setSelected(null)}><CaseDetail key={active.id} row={active} opening={records.find(r=>r.id===active.id)} previousLedger={previousLedger} history={Array.isArray(events[eventKey(active)])?events[eventKey(active)]:[]} post={post}/></Modal>}
   {sources&&<Modal title="Data and calculations" onClose={()=>setSources(false)}><Sources/></Modal>}</>
 }
 function App(){
-  const route=()=>window.location.hash==='#invoice-matching';
-  const [matching,setMatching]=useState(route);
-  useEffect(()=>{const changed=()=>setMatching(route());window.addEventListener('hashchange',changed);return ()=>window.removeEventListener('hashchange',changed)},[]);
-  return <RecoveryView key={matching?'matching':'screening'} matching={matching}/>;
+  const route=()=>window.location.hash.slice(1);
+  const [path,setPath]=useState(route);
+  useEffect(()=>{const changed=()=>setPath(route());window.addEventListener('hashchange',changed);return ()=>window.removeEventListener('hashchange',changed)},[]);
+  const [view,key]=path.split('/');
+  const measure=view==='screening' && measures.some(m=>m.key===key) ? key : null;
+  return <RecoveryView key={path} matching={view==='invoice-matching'} executive={view==='executive'} measure={measure}/>;
 }
 createRoot(document.getElementById('root')).render(<App/>);

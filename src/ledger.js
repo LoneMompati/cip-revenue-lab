@@ -1,4 +1,8 @@
 // Monetary amounts are integer cents. The demonstration uses a flat 10% duty.
+const trainingEuroRate = Object.freeze({
+  from:'EUR', to:'USD', numerator:120, denominator:100, reference:'Training rate FX-01'
+});
+
 export const duty = cents => Math.round(cents / 10);
 export const statusText = {
   referred: 'Referred', no_gap: 'No positive gap', unlinked: 'No invoice', check: 'Check evidence', review: 'To review', clear: 'No extra duty',
@@ -9,6 +13,9 @@ export function baseCase(row) {
   const e = row.evidence;
   const base = { ...row, original: e ? duty(row.declared) : null, potential: null, assessed: null, recovered: 0 };
   if (!e) return { ...base, status: row.match ? 'check' : 'unlinked' };
+  if (e.checked && e.currency==='EUR' && row.match?.status==='matched') {
+    return { ...base, fx:trainingEuroRate, status:'check' };
+  }
   if (!e.checked || e.currency !== 'USD') return { ...base, status: 'check' };
   const potential = Math.max(0, duty(e.read) - base.original);
   if (row.example == null) return { ...base, potential, status: potential ? 'review' : 'no_gap' };

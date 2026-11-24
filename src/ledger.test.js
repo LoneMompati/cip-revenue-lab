@@ -118,3 +118,24 @@ test('main register resolves submitted references before computing recovery',()=
   assert.equal(altered.match.status,'not_found');assert.equal(altered.evidence,null);assert.equal(altered.assessed,null);
   const paid=applyAction(rec,{type:'receive',cents:1703});assert.equal(paid.status,'paid');assert.equal(balance(paid),0);
 });
+
+test('main currency case converts, assesses and collects in separate steps',()=>{
+  const r=rows.find(row=>row.id==='SHP008851');
+  assert.equal(r.match.status,'matched');assert.equal(r.invoiceRef,'9Y1M1d-764');
+  assert.equal(r.original,14740);assert.equal(r.fx.reference,'Training rate FX-01');
+  assert.equal(r.potential,null);assert.equal(r.assessed,null);assert.equal(r.recovered,0);
+  assert.equal(applyAction(r,{type:'assess'}),r);
+  const converted=applyAction(r,{type:'confirm_fx'});
+  assert.equal(converted.converted,194602);assert.equal(converted.potential,4720);
+  assert.equal(converted.assessed,null);assert.equal(balance(converted),null);
+  const assessed=applyAction(converted,{type:'assess'});
+  assert.equal(balance(assessed),4720);assert.equal(assessed.recovered,0);
+  const paid=applyAction(assessed,{type:'receive',cents:2000});
+  assert.equal(paid.recovered,2000);assert.equal(balance(paid),2720);
+  assert.equal(paid.status,'partial');assert.equal(screeningQueue(paid),'currency');
+  const negative=rows.find(row=>row.id==='SHP004352');
+  assert.equal(applyAction(negative,{type:'confirm_fx'}).status,'no_gap');
+  for(const held of rows.filter(row=>row.match.status!=='matched'||!row.evidence?.checked)){
+    assert.equal(held.fx,undefined);assert.equal(applyAction(held,{type:'confirm_fx'}),held);
+  }
+});

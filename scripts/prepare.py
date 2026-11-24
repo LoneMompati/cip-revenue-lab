@@ -1,5 +1,8 @@
 """Build the public demonstration from a Kaggle shipment ZIP and extracted FATURA v1."""
 import argparse
+import base64
+from concurrent.futures import ThreadPoolExecutor
+import tempfile
 import csv
 import hashlib
 import io
@@ -85,18 +88,106 @@ def read_evidence(folder, name, box, expected_amount, expected_currency):
     return dict(document=name, read=cents(match[1]) if match else None,
                 currency=match[2].upper() if match else None, checked=passed)
 
+def encoded_png(image):
+    stream = io.BytesIO()
+    # Four-bit greyscale keeps the line legible and the evidence cheap to load.
+    image.convert("L").quantize(colors=16).save(stream, format="PNG", bits=4)
+    return base64.b64encode(stream.getvalue()).decode("ascii")
+
+
+def region(field, page, padding):
+    if not isinstance(field, dict) or not field.get("bbox"):
+        return None
+    a, b = field["bbox"]
+    left, right = sorted((a[0], b[0]))
+    low, high = sorted((a[1], b[1]))
+    w, h = page.size
+    rect = (max(0, int(left)-padding), max(0, h-int(high)-padding),
+            min(w, int(right)+padding+1), min(h, h-int(low)+padding+1))
+    return rect if rect[2] > rect[0] and rect[3] > rect[1] else None
+
+
+TOTAL_TOKEN = re.compile(r"(\d[\d,]*\.\d{2})\s*(USD\b|EUR\b|\$)", re.I)
+
+
+def process_batch(task):
+    batch, names, folder, output = task
+    evidence, assets, ocr_jobs = {}, {}, []
+    with tempfile.TemporaryDirectory() as tmp:
+        for name in names:
+            fields = json.loads((folder / "annotations" / (name+".json")).read_bytes())
+            with Image.open(folder / "images" / (name+".jpg")) as page:
+                preview = Image.new("L", page.size, "white")
+                for key in ("TITLE", "DATE", "NUMBER", "TAX", "TOTAL"):
+                    box = region(fields.get(key), page, 1)
+                    if box:
+                        preview.paste(page.crop(box).convert("L"), box[:2])
+                assets[name] = {"page": encoded_png(preview)}
+                entry = dict(document=name, batch=batch, read=None, currency=None,
+                             checked=False, reason="no_total")
+                evidence[name] = entry
+                box = region(fields.get("TOTAL"), page, 3)
+                if not box:
+                    continue
+                crop = page.crop(box).convert("L")
+                crop = crop.resize((crop.width*4, crop.height*4), Image.Resampling.LANCZOS)
+                assets[name]["line"] = encoded_png(crop)
+                path = Path(tmp) / (name+".png")
+                crop.save(path)
+                ocr_jobs.append((name, path, fields["TOTAL"].get("text","")))
+        if ocr_jobs:
+            listing = Path(tmp) / "pages.txt"
+            listing.write_text("".join(str(path)+"\n" for _,path,_ in ocr_jobs))
+            proc = subprocess.run(["tesseract",str(listing),"stdout","-l","eng","--psm","7"],
+                                  check=True, capture_output=True)
+            pages = proc.stdout.decode("utf-8").split("\f")
+            if pages and pages[-1] == "":
+                pages.pop()
+            if len(pages) != len(ocr_jobs):
+                raise ValueError(f"OCR page count differs in batch {batch}")
+            for (name, _, label), text in zip(ocr_jobs, pages, strict=True):
+                result = TOTAL_TOKEN.search(text)
+                reference = TOTAL_TOKEN.search(label)
+                entry = evidence[name]
+                entry["reason"] = "unverified"
+                if result:
+                    value, token = cents(result[1]), result[2].upper()
+                    entry["read"] = value
+                    if token != "$":
+                        entry["currency"] = token
+                    if reference and (value,token)==(cents(reference[1]),reference[2].upper()):
+                        if token == "$":
+                            entry["reason"] = "ambiguous_currency"
+                        else:
+                            entry.update(checked=True, reason="currency" if token=="EUR" else "comparable")
+    (output / f"{batch}.json").write_text(json.dumps(assets,separators=(",",":")))
+    return evidence
+
+
 def prepare(customs, folder):
     rows = shipments(customs)
-    # Pairing is deliberate and fictional. Choose low-value shipments because FATURA
-    # totals are generally much smaller than the typical shipment declaration.
-    pool = sorted(rows, key=lambda r: (r["declared"], r["id"]))[:48]
+    pool = sorted(rows, key=lambda r: (r["declared"],r["id"]))[:48]
     for i, ((name, amount, currency, box), row) in enumerate(zip(invoice_candidates(folder), pool, strict=True)):
-        row["evidence"] = read_evidence(folder, name, box, amount, currency)
-        row["account"] = f"Account {i % 12 + 1:02}"
-        row["example"] = i
-    (ROOT / "data/shipments.json").write_text(json.dumps(rows, separators=(",", ":"))+"\n")
-    print("Prepared", len(rows), "shipments,", len(pool), "linked documents,",
-          sum(r["evidence"]["checked"] for r in pool), "verified OCR reads.")
+        row.update(evidence=read_evidence(folder,name,box,amount,currency),
+                   account=f"Account {i % 12 + 1:02}",example=i)
+    used = {row["evidence"]["document"] for row in pool}
+    remaining = [row for row in rows if "evidence" not in row]
+    candidates = (p.stem for p in (folder / "annotations").glob("*.json") if p.stem not in used)
+    names = sorted(candidates,key=lambda s:rank("scale:"+s))[:len(remaining)]
+    if len(names) != len(remaining):
+        raise ValueError("Not enough distinct invoices")
+    output = ROOT / "public/evidence-batches"
+    output.mkdir(exist_ok=True)
+    size = 32
+    tasks = [(i//size,names[i:i+size],folder,output) for i in range(0,len(names),size)]
+    lookup = {}
+    with ThreadPoolExecutor(max_workers=4) as workers:
+        for evidence in workers.map(process_batch,tasks):
+            lookup.update(evidence)
+    for i, (row,name) in enumerate(zip(remaining,names,strict=True)):
+        row.update(evidence=lookup[name], account=f"Account {13+i%240:02}")
+    (ROOT / "data/shipments.json").write_text(json.dumps(rows,separators=(",",":"))+"\n")
+    print(f"Screened {len(rows)} declarations and {len(used)+len(lookup)} distinct invoices.")
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("shipment_zip", type=Path)

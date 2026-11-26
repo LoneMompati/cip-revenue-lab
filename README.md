@@ -1,5 +1,7 @@
 # Customs Intelligence Platform
 
+[Open the three-page CET3009 coursework dashboard](https://lonemompati.github.io/cip-revenue-lab/coursework/). It opens the October 2026 month-end scenario across all recovery streams. Executive Overview shows 8% cash recovery and 14% of eligible declarations reviewed. Use the sidebar for Review Performance and Collections Analysis. The dashboard uses 6,000 public Kaggle shipments and simulated case and financial records in BWP. Its static build is kept in `public/coursework/` so rebuilding this site also publishes it to `docs/coursework/`.
+
 [Open Revenue Recovery](https://lonemompati.github.io/cip-revenue-lab/)
 
 Start with [SHP004167 in the main recovery register](https://lonemompati.github.io/cip-revenue-lab/?shipment=SHP004167#screening). Its case detail shows the submitted and printed references, invoice image, duty gap, assessment, cash received and balance. Open the invoice total line, compare it with the declared amount and follow the additional duty from assessment through to collection. Select a screening queue and filter by account, commodity, minimum duty gap or case stage. Cases with uncertain evidence can be referred for a document or currency check. Search and filters update the four totals. Open a **To review** case to assess or close it. Open an assessed case to record a partial or full payment. Register actions are saved locally and shared across CIP tabs in the same browser profile when shared storage is available.
